@@ -1,4 +1,4 @@
-Expected Goals
+Implied Goals
 ================
 Thanos Livanis
 22/11/2023
@@ -15,6 +15,12 @@ Data from
 [football-data.co.uk](https://www.football-data.co.uk/data.php)  
 Removing overround using [implied
 package](https://opisthokonta.net/?p=1797)  
+
+- [Data](#data)
+- [Distributions](#distributions)
+  - [Total Goals](#total-goals)
+  - [Goal Difference](#goal-difference)
+- [Expectancy and Supremacy](#expectancy-and-supremacy)
 
 ## Data
 
@@ -50,12 +56,13 @@ football_odds <- football_odds %>%
          GG = ifelse(FTHG >= 1 & FTAG >= 1, T, F)) 
 ```
 
-## Total Goals distribution
+## Distributions
 
-Poisson and Negative Binomial fitting
+### Total Goals
+
+Fitted Poisson & Negative binomial
 
 ``` r
-# Fitted Poisson & Negative binomial distribution
 fit <- map(c("pois", "nbinom"), fitdist, data = football_odds$FTG, method = "mle")
 
 x_values <- 0:max(football_odds$FTG)
@@ -80,9 +87,9 @@ ggplot(football_odds, aes(x = FTG)) +
 
 <img src="implied-goals_files/figure-gfm/total_distr-1.png" style="display: block; margin: auto;" />
 
-## Goal difference distribution
+### Goal difference
 
-Skellam (difference of two independent Poisson) & Dixon-Coles
+Skellam (difference of two independent Poisson) & Dixon-Coles adjustment
 
 ``` r
 # Dixon-Coles adjusted density function 
@@ -137,7 +144,7 @@ ggplot(football_odds, aes(x = FTGD)) +
 
 <img src="implied-goals_files/figure-gfm/diff_distr-1.png" style="display: block; margin: auto;" />
 
-## Iterate to find goal expectancy & supremacy
+## Expectancy and Supremacy
 
 ``` r
 # Given Under probability find the mean of the Poisson distribution
@@ -156,7 +163,7 @@ implied_expectancy <- function(under_prop, under_line = 2.5) {
 # Given goal expectancy and probability of Home team to win get supremacy
 # win probability of HT is the CDF of the adjusted Skellam 
 # @rho: default value 0 -> standard Skellam 
-implied_supremacy <- function(home_prop, exp, rho = 0) {
+implied_supremacy <- function(home_prop, exp, rho = -0.1) {
   
   dc_model <- function(sup){
     
@@ -174,13 +181,13 @@ implied_supremacy <- function(home_prop, exp, rho = 0) {
   return (sup)
 }
 
-gg_prop <- function(home_exp, away_exp) {
+gg_prop <- function(home_exp, away_exp, rho = -0.1) {
   
   score <- matrix(nrow = 8, ncol = 8, dimnames = list(as.character(0:7), as.character(0:7)))
   
   for (h in 1:nrow(score)) {
     for (a in 1:ncol(score)) {
-      score[h, a] <- ddc(h-1, a-1, home_exp, away_exp, -0.1)
+      score[h, a] <- ddc(h-1, a-1, home_exp, away_exp, rho)
     }
   }
   
@@ -222,7 +229,7 @@ expected_goals <- function(data, bookmaker, rho, method = "basic") {
            Supremacy = map2_dbl(PH, Expectancy, implied_supremacy, rho = rho),
            Home_exp = (Expectancy + Supremacy)/2,
            Away_exp = (Expectancy - Supremacy)/2, 
-           PGG = map2_dbl(Home_exp, Away_exp, gg_prop),
+           PGG = map2_dbl(Home_exp, Away_exp, gg_prop, rho = rho),
            rho = as.character(rho), 
            method = method) %>%
     drop_na()
@@ -238,16 +245,15 @@ The **“Basic”** method from Implied package is not a good way to remove
 bookmaker’s margin, but in this case, if we employ a simple
 Dixon-Coles\|Skellam model to estimate win probability of home team it
 seems to lead to better results, the other methods do not succeed. 
-There isn’t much difference between different rho values, standard
-Skellam (rho = 0) is fine.  
+Rho’s values is -0.1 by calibrating the goal-goal probability.
 
 ``` r
 ggplot(filter(goal_expectancy, rho == "0"), aes(x = Expectancy, y = FTHG + FTAG)) +
   geom_point(alpha = 0.1) + geom_smooth(method = "lm", se = F) +
   geom_abline(slope = 1, intercept = 0) +
-  labs(title = "Actual Total Goals ~ Expectancy", y = "Home Goals + Away Goals") +
   coord_cartesian(ylim = c(0, 6)) +
-  theme_minimal() 
+  theme_bw() +
+  labs(title = "Actual Total Goals ~ Expectancy", y = "Home Goals + Away Goals") 
 ```
 
 <img src="implied-goals_files/figure-gfm/plots-1.png" style="display: block; margin: auto;" />
@@ -256,9 +262,9 @@ ggplot(filter(goal_expectancy, rho == "0"), aes(x = Expectancy, y = FTHG + FTAG)
 ggplot(goal_expectancy, aes(x = Supremacy, y = FTGD, color = rho)) +
   geom_point(alpha = 0.1) + geom_smooth(method = "lm", se = F) +
   geom_abline(slope = 1, intercept = 0) +
-  labs(title = "Actual Goal Difference ~ Supremacy", y = "Home Goals - Away Goals") +
   coord_cartesian(ylim = c(-5, 5)) +
-  theme_minimal() 
+  theme_bw() +
+  labs(title = "Actual Goal Difference ~ Supremacy", y = "Home Goals - Away Goals") 
 ```
 
 <img src="implied-goals_files/figure-gfm/plots-2.png" style="display: block; margin: auto;" />
@@ -288,7 +294,7 @@ goal_expectancy %>%
 <img src="implied-goals_files/figure-gfm/gg_prop-1.png" style="display: block; margin: auto;" />
 
 ``` r
-ggplot(filter(goal_expectancy, rho == "0"), aes(x = PH, y = Supremacy, color = PU)) +
+ggplot(filter(goal_expectancy, rho == "-0.1"), aes(x = PH, y = Supremacy, color = PU)) +
   geom_point(alpha = 0.1) + geom_smooth(method = "lm", formula = y ~ poly(x,8), se = F) +
   theme_bw() +
   labs(title = "Supremacy ~ f(Home Prop, Under Prop)",
