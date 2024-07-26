@@ -263,12 +263,13 @@ plot_vb_pct <- function(bookies, group_var) {
     filter(bookie_ref == "PinnacleC", bookie_bet %in% bookies) %>%
     left_join(football_odds[, c("ID", "Div", "Season")], by = "ID") %>%
     group_by(!!var) %>%
-    summarise(EV_pos_pct = (sum(EV > 0) / n()) * 100, .groups = "drop") %>%
+    summarise(EV_pos_pct = sum(EV > 0) / n(), .groups = "drop") %>%
     arrange(EV_pos_pct) %>%
     mutate(var_f = factor(!!var, levels = !!var)) %>%
     ggplot(aes(x = var_f, y = EV_pos_pct, fill = var_f)) +
     geom_bar(stat = "identity") + coord_flip() +
-    scale_fill_viridis(discrete = T, option = "B") + guides(fill = "none") + theme_bw() +
+    scale_fill_viridis(discrete = T, option = "B") + guides(fill = "none") + 
+    scale_y_continuous(labels = percent_format()) + theme_bw() +
     labs(x = NULL, y = "Percentage of bets with positive EV")
   print(pl)
 }
@@ -329,7 +330,7 @@ bootstrap <- function(bookie, nbets, nsims = 1000) {
     mutate(success = (FTR == selection), 
            PnL = -1 + success*odds)   
   
-  # random sample, n bets from every bin with replacement & summarize
+  # random sample, n bets with replacement & summarize
   sampling <- function(df) {
     df %>% 
       slice_sample(n = nbets, replace = T) %>%
@@ -346,14 +347,14 @@ bootstrap <- function(bookie, nbets, nsims = 1000) {
   return (sim_res)
 }
 
-bootstraping <- real_time_value_bets %>% 
+bootstrapping <- real_time_value_bets %>% 
   select(bookie_bet, NVBets) %>%
   distinct(.keep_all = T) %>%
   rename(nbets = NVBets, bookie = bookie_bet) %>%
   pmap_dfr(bootstrap, .progress = T)
 
-real_time_value_bets <- left_join(real_time_value_bets, bootstraping, by = c("bookie_bet" = "bookie", 
-                                                                             "NVBets" = "nbets")) %>%
+real_time_value_bets <- left_join(real_time_value_bets, bootstrapping, by = c("bookie_bet" = "bookie", 
+                                                                              "NVBets" = "nbets")) %>%
   mutate(p_value = pmap_dbl(list(q = Yield, mean = yield_avg, sd = yield_sd), pnorm, lower.tail = F), 
          logp = log10(p_value)) %>% 
   select(-c(yield_avg, yield_sd)) %>%
