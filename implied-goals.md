@@ -188,7 +188,7 @@ props <- football_odds %>%
 *Expectancy doesn’t depend on rho, supremacy does.*  
 Dixon-Coles model adjusts probabilities of low scores but the summation
 of under 2.5 scores is equal to the standard poisson model. Find λ such
-that: $\sum_{k = 0}^{2} \frac{λ^{k}e^{-λ}}{k!} = under$
+that: $\sum\limits_{k = 0}^2 \frac{λ^{k}e^{-λ}}{k!} = under$
 
 ``` r
 # Given Under probability find the mean of the Poisson distribution
