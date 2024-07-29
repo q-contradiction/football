@@ -118,23 +118,24 @@ team_ratings <- function(df, last_n = Inf) {
   rating <- unique(df$HomeTeam) %>%
     lapply(function(team) numeric(0)) %>% setNames(unique(df$HomeTeam))
   
-  df <- df %>% arrange(Date) %>% ddply(.(ID), function(ID) {
-    HT <- ID$HomeTeam
-    AT <- ID$AwayTeam
-    
-    # pre game ratings
-    ID$home_rating <- sum(rating[[HT]])
-    ID$away_rating <- sum(rating[[AT]])
-    
-    # update team ratings 
-    p_home <- -ID$PH + ifelse(ID$FTR == "H", 1, ifelse(ID$FTR == "D", ID$PD, 0))
-    p_away <- -ID$PA + ifelse(ID$FTR == "A", 1, ifelse(ID$FTR == "D", ID$PD, 0))
-    
-    rating[[HT]] <<- update_rating(rating[[HT]], p_home, last_n)
-    rating[[AT]] <<- update_rating(rating[[AT]], p_away, last_n)
-    
-    return(ID)
-  }) %>% 
+  df <- df %>% 
+    arrange(Date) %>% ddply(.(ID), function(ID) {
+      HT <- ID$HomeTeam
+      AT <- ID$AwayTeam
+      
+      # pre game ratings
+      ID$home_rating <- sum(rating[[HT]])
+      ID$away_rating <- sum(rating[[AT]])
+      
+      # update team ratings 
+      p_home <- -ID$PH + ifelse(ID$FTR == "H", 1, ifelse(ID$FTR == "D", ID$PD, 0))
+      p_away <- -ID$PA + ifelse(ID$FTR == "A", 1, ifelse(ID$FTR == "D", ID$PD, 0))
+      
+      rating[[HT]] <<- update_rating(rating[[HT]], p_home, last_n)
+      rating[[AT]] <<- update_rating(rating[[AT]], p_away, last_n)
+      
+      return(ID)
+    }) %>% 
     mutate(match_rating = home_rating - away_rating) %>%
     filter(match_rating != 0) %>%
     relocate(home_rating, away_rating, match_rating, .after = AwayTeam)
@@ -143,7 +144,6 @@ team_ratings <- function(df, last_n = Inf) {
 }
 
 football_odds <- football_odds %>% 
-  filter(between(Season, 2010, 2022)) %>%
   mutate(ID = as.numeric(rownames(.))) %>%
   fair_probabilities() 
 
@@ -205,5 +205,5 @@ ggplot(returns, aes(x = NBets, y = PnL, color = bookmaker, linetype = strategy))
   geom_line() + 
   scale_linetype_manual(values = c("cold" = "solid", "hot" = "dotted")) +
   facet_wrap(threshold ~., labeller = label_both,  scales = "free") +
-  theme_bw() +
+  theme_bw() + 
   labs(title = "PnL backing colder and hotter teams")
