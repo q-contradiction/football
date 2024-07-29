@@ -47,7 +47,7 @@ odds_abbs <- list(Bet365 = c("B365H", "B365D", "B365A"), Pinnacle = c("PSH", "PS
 
 # 2 - Probabilities & Ratings ----
 
-# remove margin from odds, power method
+# remove margin from odds, power method finding the value of k, such as: sum(prop^k) = 1
 remove_overround <- function(bookmaker_odds) {
   
   bookmaker_odds <- as.numeric(bookmaker_odds)
@@ -59,15 +59,15 @@ remove_overround <- function(bookmaker_odds) {
   if (n < 2 || any(is.na(overround_props)) || any(overround_props > 1) || sum(overround_props) < 1) 
     return (rep(NA, n))
   
-  sum_prop <- function(bias) {
-    props <- overround_props^(1/bias)
+  sum_prop <- function(k) {
+    props <- overround_props^(1/k)
     return (sum(props) - 1)
   }
   
-  bias_ <- tryCatch(uniroot(sum_prop, c(0.5, 1))$root, 
+  k <- tryCatch(uniroot(sum_prop, c(0.5, 1))$root, 
                     error = function(e) { warning(conditionMessage(e)); NA })
   
-  fair_props <- overround_props^(1/bias_) %>% {./sum(.)}
+  fair_props <- overround_props^(1/k) %>% {./sum(.)}
   
   return (fair_props)
 }
@@ -179,8 +179,8 @@ contrarian_betting <- function(data, bookmaker, threshold = 0) {
              
   bets_contr <- bets_contr %>%
     mutate(NBets = seq(1, by = 1, length.out = nrow(.)), 
-           PnL_cold_run = cumsum(PnL_cold), 
-           PnL_hot_run = cumsum(PnL_hot), 
+           cold = cumsum(PnL_cold), 
+           hot = cumsum(PnL_hot), 
            bookmaker = bookmaker, 
            threshold = as.character(threshold)) 
   
@@ -192,16 +192,18 @@ params <- data.frame(bookmaker = rep(c("Bet365", "PinnacleC", "Pinnacle", "Marke
 
 returns <- params %>%
   pmap_dfr(contrarian_betting, data = ratings) %>% 
-  reshape2::melt(id.vars = c("Season", "Date", "NBets", "bookmaker", "threshold"),
-                 measure.vars = c("PnL_cold_run", "PnL_hot_run"))
+  pivot_longer(
+    cols = c("cold", "hot"),
+    names_to = "strategy",
+    values_to = "PnL"
+  )
 
 # In all bookmakers returns when backing "colder"teams are higher
 # And using the best price in the market we can achieve a positive yield
 # We can also achieve minor profit in Pinnacle if we set a high threshold
-ggplot(returns, aes(x = NBets, y = value, color = bookmaker, linetype = variable)) +
+ggplot(returns, aes(x = NBets, y = PnL, color = bookmaker, linetype = strategy)) +
   geom_line() + 
-  scale_linetype_manual(values = c("PnL_cold_run" = "solid", "PnL_hot_run" = "dotted")) +
+  scale_linetype_manual(values = c("cold" = "solid", "hot" = "dotted")) +
   facet_wrap(threshold ~., labeller = label_both,  scales = "free") +
   theme_bw() +
-  labs(title = "PnL backing colder and hotter teams", 
-       y = "Profit n Loss")
+  labs(title = "PnL backing colder and hotter teams")
