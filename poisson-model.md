@@ -3,22 +3,23 @@ Poisson Model
 Thanos L.
 2024-07-28
 
-An application of the Basic Poisson Model (BPM) in Football [M. J.
-Maher - Modelling association football
+A study of the Basic Poisson Model (BPM) in Football: [M. J. Maher -
+Modelling association football
 scores](https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1467-9574.1982.tb00782.x)
 
-We apply the BPM in different leagues & different decades
+We apply the BPM in different leagues.
 
 Data from [engsoccerdata](https://github.com/jalapic/engsoccerdata)
 package by James P. Curley (2016).
 
 - [Data](#data)
 - [Joint Distribution](#joint-distribution)
+  - [Observed and Expected Frequency](#observed-and-expected-frequency)
   - [Independence](#independence)
-- [Poisson model](#poisson-model)
+- [Poisson Regression](#poisson-regression)
 - [Evaluation](#evaluation)
   - [Rank Prob Score](#rank-probability-score)
-  - [Poisson Props - Actual](#poisson-props-actual)
+  - [Poisson Props and Actual](#poisson-props-and-actual)
 
 ## Data
 
@@ -120,10 +121,8 @@ score_joint_distr <- function(data) {
 # modern era - main leagues
 main_leagues <- filter(football_data, tier == 1, Season > 1980)
 
-# all leagues, joint distr
 all_sc <- score_joint_distr(main_leagues) 
 
-# by country,  joint distr
 country_sc <- main_leagues %>%
   group_split(country) %>%
   map_dfr(score_joint_distr)
@@ -139,15 +138,15 @@ plot_dist <- function(data, goal_var) {
               expected = sum(expected), .groups = "drop") %>%
     ggplot() +
     geom_bar(aes(!!sym(goal_var), observed), stat = "identity", fill = "lightblue", color = "black", alpha = 0.7) +
-    geom_point(aes(!!sym(goal_var), expected, color = "Predicted")) + 
-    geom_line(aes(!!sym(goal_var), expected, color = "Predicted"), ) + 
+    geom_point(aes(!!sym(goal_var), expected, color = "Expected")) + 
+    geom_line(aes(!!sym(goal_var), expected, color = "Expected"), ) + 
     scale_x_continuous(breaks = seq(-10, 10, by = 1)) +
     facet_wrap(country ~.) +  
-    scale_color_manual(name = NULL, values = c('Predicted' = 'orange')) +
+    scale_color_manual(name = NULL, values = c('Expected' = 'orange')) +
     theme_bw() 
 }
 
-# var is {ratio, diff = obs - exp}
+# var can be {ratio, diff ~ (obs - exp)}
 plot_tile <- function(data, var) {
   
   name_ <- ifelse(var == "ratio", expression(frac(f(i, j), f[h](i) * f[v](j))), "obs - exp")
@@ -163,6 +162,8 @@ plot_tile <- function(data, var) {
     theme_bw()
 }
 ```
+
+### Observed and Expected Frequency
 
 ``` r
 ggarrange(plot_dist(all_sc, "tgoal") + coord_cartesian(xlim = c(0, 8)), 
@@ -193,7 +194,7 @@ plot_tile(all_sc, "ratio")
 
 <img src="poisson-model_files/figure-gfm/plot_id-1.png" style="display: block; margin: auto;" />
 
-## Poisson model
+## Poisson Regression
 
 ``` r
 # round of match played in the season 
@@ -338,15 +339,21 @@ rank_probability_score <- function(props_table, result) {
     as.data.frame(result),
     tribble(
       ~result, ~r1, ~r2, ~r3,
-      "H" ,  1 ,  1 ,  1 ,
-      "D" ,  0 ,  1 ,  1 ,
-      "A" ,  0 ,  0 ,  1 
-    ), by = "result") %>%
-    select(r1, r2, r3) %>% data.matrix()
+         "H" ,  1 ,  1 ,  1 ,
+         "D" ,  0 ,  1 ,  1 ,
+         "A" ,  0 ,  0 ,  1 
+    ), 
+    by = "result") %>%
+    select(r1, r2, r3) %>% 
+    data.matrix()
   
   return (0.5*rowSums((cum_props - res_props)^2))
 }
 
+# Poisson model
+props$RPS <- rank_probability_score(select(props, PPH, PPD, PPA), props$result)
+
+# Null model
 null_model <- main_leagues %>%
   mutate(result = factor(result, levels = c("H", "D", "A"))) %>%
   count(country, result) %>%
@@ -358,25 +365,106 @@ null_model <- main_leagues %>%
   right_join(select(main_leagues, ID, country, result), by = "country") 
 
 null_model$RPS <- rank_probability_score(select(null_model, H, D, A), null_model$result)
+```
 
-rps_null <- null_model %>%
-  group_by(country) %>%
-  summarize(RPS = mean(RPS)) %>%
-  mutate(type = "NULL")
+``` r
+# Odds model
+football_odds <- readRDS(file = "./data-raw/football-data.rds")
 
-props$RPS <- rank_probability_score(select(props, PPH, PPD, PPA), props$result)
+# Odds Abbreviations for 1x2 in Football-data.co.uk
+odds_abbs <- list(Bet365 = c("B365H", "B365D", "B365A"), Pinnacle = c("PSH", "PSD", "PSA"),
+                  PinnacleC = c("PSCH", "PSCD", "PSCA"), WilliamHill = c("WHH", "WHD", "WHA"), 
+                  Sportingbet =  c("SBH", "SBD", "SBA"), Ladbrokes = c("LBH", "LBD", "LBA"),
+                  Interwetten =  c("IWH", "IWD", "IWA"), MarketAvg = c("AvgH", "AvgD", "AvgA"))
 
+# remove margin from odds, power method finding the value of k, such as: sum(prop^k) = 1
+remove_overround <- function(bookmaker_odds) {
+  
+  bookmaker_odds <- as.numeric(bookmaker_odds)
+  
+  n <- length(bookmaker_odds)
+  overround_props <- 1/bookmaker_odds
+  
+  # invalid odds
+  if (n < 2 || any(is.na(overround_props)) || any(overround_props > 1) || sum(overround_props) < 1) 
+    return (rep(NA, n))
+  
+  sum_prop <- function(k) {
+    props <- overround_props^(1/k)
+    return (sum(props) - 1)
+  }
+  
+  k <- tryCatch(uniroot(sum_prop, c(0.5, 1))$root, 
+                error = function(e) { warning(conditionMessage(e)); NA })
+  
+  fair_props <- overround_props^(1/k) %>% {./sum(.)}
+  
+  return (fair_props)
+}
+
+fair_probabilities <- function(df) {
+  
+  for (i in 1:3) {
+    dh <- df[, unlist(odds_abbs)] %>%
+      select(ends_with(c("H", "D", "A")[i])) %>%
+      data.matrix()
+    
+    prop <- rowMeans(1/dh, na.rm = T)
+    col <- c("OH", "OD", "OA")[i]
+    
+    df[[col]] <- 1/prop
+  }
+  
+  fair_props <- mapply(c, df[["OH"]], df[["OD"]], df[["OA"]], SIMPLIFY = F) %>%
+    map(remove_overround) 
+  
+  df <- df %>% 
+    mutate(PH = sapply(fair_props, `[[`, 1), 
+           PD = sapply(fair_props, `[[`, 2), 
+           PA = sapply(fair_props, `[[`, 3)) %>%
+    filter(!is.na(PH)) %>%
+    relocate(PH, PD, PA, .before = "B365H")
+  
+  return (df)
+}
+
+div_to_ctr <- c(
+  "F1" = "France", "SC0" = "Scotland",
+  "D1" = "Germany", "B1" = "Belgium",
+  "N1" = "Holland", "P1" = "Portugal",
+  "E0" = "England", "I1" = "Italy",
+  "G1" = "Greece", "SP1" = "Spain"
+)
+
+football_odds <- football_odds %>%
+  mutate(country = recode(Div, !!!div_to_ctr, .default = NA_character_)) %>%
+  filter(country %in% main_leagues$country) %>%
+  fair_probabilities() %>%
+  select(country, PH, PD, PA, FTR)
+
+football_odds$RPS <- rank_probability_score(select(football_odds, PH, PD, PA), football_odds$FTR)
+```
+
+``` r
+# combine models RPS
 props %>%
-  group_by(country) %>%
-  summarize(RPS = mean(RPS), .groups = "drop") %>%
-  mutate(type = "Poisson") %>%
-  bind_rows(rps_null) %>%
-  ggplot(aes(x = country, y = RPS, fill = type)) +
+  summarize(RPS = mean(RPS), .by = country) %>%
+  mutate(model = "poisson") %>%
+  bind_rows(null_model %>%
+              summarize(RPS = mean(RPS), .by = country) %>%
+              mutate(model = "null")) %>%
+  bind_rows(football_odds %>%
+              summarize(RPS = mean(RPS), .by = country) %>%
+              mutate(model = "odds")) %>%
+  mutate(model = factor(model, levels = c("odds", "poisson", "null"))) %>%
+  ggplot(aes(x = country, y = RPS, fill = model)) +
   geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_brewer(palette = "Set2") +
+  coord_cartesian(ylim = c(0.15, 0.23)) +
   theme_bw()
 ```
 
-<img src="poisson-model_files/figure-gfm/rps-1.png" style="display: block; margin: auto;" />
+<img src="poisson-model_files/figure-gfm/rps_plot-1.png" style="display: block; margin: auto;" />
 
 ### Poisson Props - Actual
 
@@ -387,14 +475,14 @@ prop_table_poisson <- props %>%
   setNames(c("country", "result", "H", "D", "A")) %>%
   pivot_longer(cols = c(H, D, A), names_to = "selection", values_to = "pois_prop") %>% 
   mutate(evaluation = (result == selection), 
-         pp_int = cut(pois_prop, breaks = seq(0, 1, 0.025))) %>% 
+         pp_int = cut(pois_prop, breaks = seq(0, 1, 0.05))) %>% 
   group_by(country, pp_int) %>%
   summarise(obs = n(), 
             poison_prop = mean(pois_prop),
             actual_prop = mean(evaluation), .groups = "drop")
 
 ggplot(prop_table_poisson, aes(x = poison_prop, y = actual_prop, color = country)) +
-  geom_point() + geom_smooth(method = "lm", formula = y ~ x -1, se = F, mapping = aes(weight = obs)) + 
+  geom_point() + geom_smooth(method = "lm", formula = y ~ x, se = F, mapping = aes(weight = obs)) + 
   geom_abline(slope = 1, intercept = 0) + theme_bw() +
   ggtitle("Poisson Probability - Actual Probability")
 ```
