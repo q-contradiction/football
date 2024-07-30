@@ -19,7 +19,7 @@ package by James P. Curley (2016).
 - [Poisson Regression](#poisson-regression)
 - [Evaluation](#evaluation)
   - [Rank Prob Score](#rank-probability-score)
-  - [Poisson Props and Actual](#poisson-props-and-actual)
+  - [Regression](#regression)
 
 ## Data
 
@@ -34,7 +34,6 @@ suppressPackageStartupMessages({
 })
 
 rm(list = ls())
-options(scipen = 999)
 
 leagues <- quote(list(belgium, england, france, germany, greece, 
                       holland, italy, portugal, scotland, spain))
@@ -60,10 +59,6 @@ football_data <- eval(leagues) %>%
   filter(if_all(all_of(c("home", "visitor", "hgoal", "vgoal")), ~ !is.na(.))) 
 ```
 
-Goal trends were very irregular before 1960. They stabilized after 1980.
-It is worth noting that the total number of goals remains steady since
-then, but the home effect constantly decreases.
-
 ``` r
 football_data %>%
   group_by(Season) %>%
@@ -76,6 +71,10 @@ football_data %>%
 ```
 
 <img src="poisson-model_files/figure-gfm/goal_trend-1.png" style="display: block; margin: auto;" />
+
+Goal trends were very irregular before 1960. They stabilized after 1980.
+It is worth noting that the total number of goals remains steady since
+then, but the home effect constantly decreases.
 
 ## Joint Distribution
 
@@ -419,14 +418,12 @@ fair_probabilities <- function(df) {
   fair_props <- mapply(c, df[["OH"]], df[["OD"]], df[["OA"]], SIMPLIFY = F) %>%
     map(remove_overround) 
   
-  df <- df %>% 
+  df %>% 
     mutate(PH = sapply(fair_props, `[[`, 1), 
            PD = sapply(fair_props, `[[`, 2), 
            PA = sapply(fair_props, `[[`, 3)) %>%
     filter(!is.na(PH)) %>%
     relocate(PH, PD, PA, .before = "B365H")
-  
-  return (df)
 }
 
 div_to_ctr <- c(
@@ -467,7 +464,7 @@ props %>%
 
 <img src="poisson-model_files/figure-gfm/rps_plot-1.png" style="display: block; margin: auto;" />
 
-### Poisson Props - Actual
+### Regression
 
 ``` r
 # poisson - actual probability
@@ -476,7 +473,7 @@ prop_table_poisson <- props %>%
   setNames(c("country", "result", "H", "D", "A")) %>%
   pivot_longer(cols = c(H, D, A), names_to = "selection", values_to = "pois_prop") %>% 
   mutate(evaluation = (result == selection), 
-         pp_int = cut(pois_prop, breaks = seq(0, 1, 0.05))) %>% 
+         pp_int = cut(pois_prop, breaks = seq(0, 1, 0.025))) %>% 
   group_by(country, pp_int) %>%
   summarise(obs = n(), 
             poison_prop = mean(pois_prop),
