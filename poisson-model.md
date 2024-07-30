@@ -30,7 +30,7 @@ suppressPackageStartupMessages({
   library(skellam)
   library(tidyverse)
   library(ggpubr)
-  library(engsoccerdata) #https://github.com/jalapic/engsoccerdata
+  library(engsoccerdata) 
 })
 
 rm(list = ls())
@@ -323,7 +323,8 @@ ggplot(mle, aes(x = rate, y = lik)) +
 ``` r
 props <- main_leagues %>% 
   group_split(country, Season) %>%
-  map_dfr(apply_poisson, rate = 0)
+  map_dfr(apply_poisson, rate = 0) %>%
+  drop_na(hgoal_exp)
 ```
 
 ## Evaluation
