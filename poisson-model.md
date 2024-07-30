@@ -1,6 +1,6 @@
 Poisson Model
 ================
-Thanos L.
+Thanos Livanis
 2024-07-28
 
 A study of the Basic Poisson Model (BPM) in Football: [M. J. Maher -
@@ -293,7 +293,7 @@ apply_poisson <- function(league_season, min_round = 10, rate = 0) {
 log_lik <- function(rate) {
   
   main_leagues %>% 
-    filter(Season == 2000) %>%
+    filter(Season %in% c(1995, 2005, 2015)) %>%
     group_split(country, Season) %>%
     map_dfr(apply_poisson, rate = rate) %>%
     mutate(p = case_when(
@@ -303,17 +303,21 @@ log_lik <- function(rate) {
     )) %>% 
     pull(p) %>%
     log10() %>%
-    sum()
+    sum(na.rm = T)
 }
 
 mle <- 
-  data.frame(rate = seq(0, 0.1, 0.01)) %>% 
+  data.frame(rate = seq(0, 0.1, 0.005)) %>% 
   mutate(lik = map_dbl(rate, log_lik))
+
+rate_max <- mle$rate[which.max(mle$lik)]
+
+#optim(0.04, fn = log_lik, method = "L-BFGS-B", lower = 0, upper = 0.1)
 
 ggplot(mle, aes(x = rate, y = lik)) + 
   geom_point(size = 2) + geom_smooth(method = "lm", formula = y ~ poly(x,2), color = "lightblue") +
-  geom_vline(xintercept = mle$rate[which.max(mle$lik)], linetype = "dashed", color = "orange") +
-  scale_x_continuous(breaks= sort(c(seq(0, 0.1, 0.02), mle$rate[which.max(mle$lik)]))) +
+  geom_vline(xintercept = rate_max, linetype = "dashed", color = "orange") +
+  scale_x_continuous(breaks= sort(c(seq(0, 0.1, 0.02), rate_max))) +
   theme_bw()
 ```
 
@@ -322,7 +326,7 @@ ggplot(mle, aes(x = rate, y = lik)) +
 ``` r
 props <- main_leagues %>% 
   group_split(country, Season) %>%
-  map_dfr(apply_poisson, rate = 0) %>%
+  map_dfr(apply_poisson, rate = rate_max) %>%
   drop_na(hgoal_exp)
 ```
 
@@ -398,9 +402,7 @@ remove_overround <- function(bookmaker_odds) {
                 error = function(e) { warning(conditionMessage(e)); NA })
   
   fair_props <- overround_props^(1/k) %>% {./sum(.)}
-  
-  return (fair_props)
-}
+  }
 
 fair_probabilities <- function(df) {
   
@@ -455,11 +457,12 @@ props %>%
               summarize(RPS = mean(RPS), .by = country) %>%
               mutate(model = "odds")) %>%
   mutate(model = factor(model, levels = c("odds", "poisson", "null"))) %>%
-  ggplot(aes(x = country, y = RPS, fill = model)) +
+  ggplot(aes(x = substr(country, 1, 3), y = RPS, fill = model)) +
   geom_bar(stat = "identity", position = "dodge") +
   scale_fill_brewer(palette = "Set2") +
   coord_cartesian(ylim = c(0.15, 0.23)) +
-  theme_bw()
+  theme_bw() +
+  labs(x = NULL)
 ```
 
 <img src="poisson-model_files/figure-gfm/rps_plot-1.png" style="display: block; margin: auto;" />
@@ -468,8 +471,8 @@ props %>%
 
 ``` r
 # poisson - actual probability
-prop_table_poisson <- props %>%
-  select(country, result, PPH, PPD, PPA) %>% na.omit() %>% 
+props %>%
+  select(country, result, PPH, PPD, PPA) %>% 
   setNames(c("country", "result", "H", "D", "A")) %>%
   pivot_longer(cols = c(H, D, A), names_to = "selection", values_to = "pois_prop") %>% 
   mutate(evaluation = (result == selection), 
@@ -477,11 +480,11 @@ prop_table_poisson <- props %>%
   group_by(country, pp_int) %>%
   summarise(obs = n(), 
             poison_prop = mean(pois_prop),
-            actual_prop = mean(evaluation), .groups = "drop")
-
-ggplot(prop_table_poisson, aes(x = poison_prop, y = actual_prop, color = country)) +
+            actual_prop = mean(evaluation), .groups = "drop") %>%
+  ggplot(aes(x = poison_prop, y = actual_prop, color = substr(country, 1, 3))) +
   geom_point() + geom_smooth(method = "lm", formula = y ~ x, se = F, mapping = aes(weight = obs)) + 
   geom_abline(slope = 1, intercept = 0) + theme_bw() +
+  guides(color = guide_legend(title = NULL)) +
   ggtitle("Poisson Probability - Actual Probability")
 ```
 
